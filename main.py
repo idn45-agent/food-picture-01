@@ -623,6 +623,32 @@ def draw_soy_dish(cx, cy):
     ellipse(cx, cy, 60, 46, shine, blend=True)
 
 
+def draw_sparkles(buf, W, H):
+    """Six tiny four-point star sparkles on the glossiest spots.
+
+    A thin white diamond-cross (horizontal and vertical arms with a
+    soft alpha falloff and a bright core), stamped at fixed positions:
+    two on the salmon nigiri tops, two on the ikura gunkan mounds, one
+    on the tuna, one on the soy dish. ``buf`` is the framebuffer the
+    arms are blended into (kept explicit for clarity; the pixel
+    helpers already bounds-check against W and H).
+    """
+    spots = [(190, 180, 9), (578, 183, 9),    # salmon nigiri tops
+             (642, 326, 8), (259, 649, 8),    # ikura gunkan mounds
+             (386, 166, 8),                   # tuna nigiri top
+             (579, 649, 7)]                   # soy dish shine
+    for cx, cy, r in spots:
+        for t in range(-r, r + 1):
+            a = 0.80 * (1.0 - abs(t) / (r + 1.0)) ** 1.5
+            blend_px(cx + t, cy, 255, 255, 255, a)
+            blend_px(cx, cy + t, 255, 255, 255, a)
+        blend_px(cx, cy, 255, 255, 255, 0.95)
+        blend_px(cx - 1, cy, 255, 255, 255, 0.55)
+        blend_px(cx + 1, cy, 255, 255, 255, 0.55)
+        blend_px(cx, cy - 1, 255, 255, 255, 0.55)
+        blend_px(cx, cy + 1, 255, 255, 255, 0.55)
+
+
 # ---------------------------------------------------------------- compose
 
 def compose():
@@ -652,6 +678,9 @@ def compose():
     draw_lemon(548, 450, 30)
     draw_gunkan(272, 664, 56)
     draw_soy_dish(598, 668)
+
+    # Final touch: star sparkles on the glossiest spots.
+    draw_sparkles(FB, W, H)
 
 
 def main():
