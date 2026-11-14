@@ -142,9 +142,17 @@ def ellipse(cx, cy, rx, ry, fn, blend=False):
 def soft_shadow(cx, cy, rx, ry):
     """A soft dark ellipse used as a drop shadow under a piece of food."""
     def fn(u, v, d):
-        a = 0.42 * (1.0 - d) * (1.0 - d)
+        a = 0.56 * (1.0 - d) * (1.0 - d)
         return (0, 0, 0, a)
     ellipse(cx, cy, rx, ry, fn, blend=True)
+
+
+def draw_warm_glow():
+    """Very subtle warm radial light centred on the platter."""
+    def fn(u, v, d):
+        a = 0.14 * (1.0 - d) * (1.0 - d)
+        return (255, 206, 148, a)
+    ellipse(400, 402, 372, 352, fn, blend=True)
 
 
 def draw_platter():
@@ -163,14 +171,14 @@ def draw_platter():
         n = (hash2(int(u * 400 + 900), int(v * 400 + 900)) - 0.5) * 7.0
         return (base + n, base * 1.02 + n, base * 1.14 + n)
 
-    ellipse(400, 415, 348, 330, face)
-    ellipse(400, 415, 348, 330, rim)
+    ellipse(400, 402, 364, 346, face)
+    ellipse(400, 402, 364, 346, rim)
     # Thin bright arc along the top rim to suggest a glazed edge.
     def arc(u, v, d):
         if v < -0.86 and 0.965 < d <= 1.0:
             return (110, 118, 130, 0.35)
         return None
-    ellipse(400, 415, 348, 330, arc, blend=True)
+    ellipse(400, 402, 364, 346, arc, blend=True)
 
 
 # ---------------------------------------------------------------- shapes
@@ -225,6 +233,71 @@ def gloss(nx, ny, gx, gy, gw, strength):
     return strength * (1.0 - d2) * (1.0 - d2)
 
 
+def sheen(nx, ny):
+    """Soft diagonal wet-sheen band across a topping, 0..1."""
+    s = (nx - ny - 0.15) / 0.9
+    v = 1.0 - s * s
+    return v if v > 0.0 else 0.0
+
+
+def _lcg(seed):
+    """Deterministic linear congruential generator of floats in 0..1."""
+    state = (seed * 2654435761 + 97) & 0x7FFFFFFF
+    while True:
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        yield state / 2147483648.0
+
+
+def _grain_stamp(gx, gy, ang, light):
+    """One small elongated rice grain centred near (gx, gy)."""
+    ca = math.cos(ang)
+    sa = math.sin(ang)
+    if light:
+        col = (255, 253, 245)
+        a = 0.62
+    else:
+        col = (196, 188, 164)
+        a = 0.55
+    for t in (-2.0, -1.0, 0.0, 1.0, 2.0):
+        px = int(round(gx + ca * t))
+        py = int(round(gy + sa * t))
+        blend_px(px, py, col[0], col[1], col[2], a)
+        if -1.0 <= t <= 1.0:
+            blend_px(int(round(gx - sa + ca * t)),
+                     int(round(gy + ca + sa * t)),
+                     col[0], col[1], col[2], a * 0.55)
+
+
+def rice_grains_rrect(cx, cy, hw, hh, rad, rot, seed):
+    """Scatter fine grain speckle over a rotated rounded-rect rice block."""
+    rnd = _lcg(seed)
+    rot_r = math.radians(rot)
+    cs = math.cos(rot_r)
+    sn = math.sin(rot_r)
+    for _ in range(170):
+        lx = (next(rnd) * 2.0 - 1.0) * (hw - 4)
+        ly = (next(rnd) * 2.0 - 1.0) * (hh - 3)
+        ix = abs(lx) - (hw - rad)
+        iy = abs(ly) - (hh - rad)
+        if ix > 0 and iy > 0 and ix * ix + iy * iy > rad * rad:
+            continue
+        gx = cx + lx * cs - ly * sn
+        gy = cy + lx * sn + ly * cs
+        _grain_stamp(gx, gy, next(rnd) * math.pi, next(rnd) < 0.55)
+
+
+def rice_grains_ring(cx, cy, r, seed):
+    """Scatter fine grain speckle over a maki rice ring (annulus)."""
+    rnd = _lcg(seed)
+    for _ in range(105):
+        theta = next(rnd) * 2.0 * math.pi
+        fr = 0.53 + next(rnd) * 0.24
+        gx = cx + math.cos(theta) * fr * r
+        gy = cy + math.sin(theta) * fr * r * 0.92
+        _grain_stamp(gx, gy, theta + 1.1 + (next(rnd) - 0.5) * 0.7,
+                     next(rnd) < 0.55)
+
+
 # ---------------------------------------------------------------- nigiri
 
 def draw_rice(cx, cy, rot):
@@ -235,7 +308,10 @@ def draw_rice(cx, cy, rot):
         grain = (hash2(int(lx * 3 + 500), int(ly * 3 + 500)) - 0.5) * 14.0
         base = 238.0 * shade + grain
         return (base, base * 0.985, base * 0.94)
-    rrect(cx, cy, 84, 45, 34, rot, fn)
+    rrect(cx, cy, 99, 52, 38, rot, fn)
+    # Fine elongated grain speckle over the whole block; the topping
+    # covers the middle, so the texture reads on the exposed rim.
+    rice_grains_rrect(cx, cy, 99, 52, 38, rot, int(cx) * 131 + int(cy))
 
 
 def draw_salmon(cx, cy, rot):
@@ -248,11 +324,12 @@ def draw_salmon(cx, cy, rot):
         elif phase < 0.38:
             base = mix(base, (253, 190, 160), 0.4)
         edge = 1.0 - 0.13 * (nx * nx + ny * ny)
-        g = gloss(nx, ny, -0.25, -0.35, 0.62, 0.55)
-        return (base[0] * edge + 255 * g,
-                base[1] * edge + 255 * g,
-                base[2] * edge + 245 * g)
-    rrect(cx, cy, 86, 43, 30, rot, fn)
+        g = gloss(nx, ny, -0.25, -0.35, 0.80, 0.88)
+        sh = sheen(nx, ny) * 36.0
+        return (base[0] * edge + 255 * g + sh,
+                base[1] * edge + 255 * g + sh,
+                base[2] * edge + 245 * g + sh * 0.9)
+    rrect(cx, cy, 95, 47, 34, rot, fn)
 
 
 def draw_tuna(cx, cy, rot):
@@ -262,39 +339,41 @@ def draw_tuna(cx, cy, rot):
         if (int(lx * 0.5 + ly * 0.16) % 9) == 0:
             base = mix(base, (205, 70, 84), 0.25)
         edge = 1.0 - 0.15 * (nx * nx + ny * ny)
-        g = gloss(nx, ny, -0.22, -0.38, 0.6, 0.6)
-        return (base[0] * edge + 255 * g,
-                base[1] * edge + 250 * g,
-                base[2] * edge + 245 * g)
-    rrect(cx, cy, 86, 43, 30, rot, fn)
+        g = gloss(nx, ny, -0.22, -0.38, 0.72, 1.0)
+        sh = sheen(nx, ny) * 32.0
+        return (base[0] * edge + 255 * g + sh,
+                base[1] * edge + 250 * g + sh,
+                base[2] * edge + 245 * g + sh * 0.9)
+    rrect(cx, cy, 95, 47, 34, rot, fn)
 
 
 def draw_tamago(cx, cy, rot):
     def fn(nx, ny, lx, ly):
         base = mix((240, 178, 44), (252, 205, 84), 0.5 - 0.5 * ny)
         edge = 1.0 - 0.12 * (nx * nx + ny * ny)
-        g = gloss(nx, ny, -0.25, -0.35, 0.6, 0.4)
-        return (base[0] * edge + 255 * g,
-                base[1] * edge + 255 * g,
-                base[2] * edge + 240 * g)
-    rrect(cx, cy, 84, 44, 26, rot, fn)
+        g = gloss(nx, ny, -0.25, -0.35, 0.7, 0.65)
+        sh = sheen(nx, ny) * 24.0
+        return (base[0] * edge + 255 * g + sh,
+                base[1] * edge + 255 * g + sh,
+                base[2] * edge + 240 * g + sh * 0.85)
+    rrect(cx, cy, 95, 49, 30, rot, fn)
     # Dark nori band wrapped across the middle.
     def band(nx, ny, lx, ly):
         shade = 1.0 - 0.25 * abs(ny)
         g = gloss(nx, ny, 0.0, -0.4, 0.5, 0.35)
         return (22 * shade + 200 * g, 34 * shade + 200 * g, 30 * shade + 190 * g)
-    rrect(cx, cy, 17, 47, 8, rot, band)
+    rrect(cx, cy, 17, 54, 8, rot, band)
 
 
 def draw_nigiri(cx, cy, rot, kind):
-    soft_shadow(cx + 7, cy + 12, 95, 52)
-    draw_rice(cx, cy + 5, rot)
+    soft_shadow(cx + 8, cy + 14, 110, 62)
+    draw_rice(cx, cy + 6, rot)
     if kind == "salmon":
-        draw_salmon(cx, cy - 4, rot)
+        draw_salmon(cx, cy - 5, rot)
     elif kind == "tuna":
-        draw_tuna(cx, cy - 4, rot)
+        draw_tuna(cx, cy - 5, rot)
     else:
-        draw_tamago(cx, cy - 4, rot)
+        draw_tamago(cx, cy - 5, rot)
 
 
 # ---------------------------------------------------------------- maki
@@ -314,6 +393,7 @@ def draw_maki(cx, cy, r):
         base = 240.0 - 26.0 * d + grain
         return (base, base * 0.985, base * 0.94)
     ellipse(cx, cy, r, r * 0.92, rice)
+    rice_grains_ring(cx, cy, r, int(cx) * 57 + int(cy) * 3 + 11)
 
     def centre(u, v, d):
         if d > 0.46:
@@ -331,6 +411,64 @@ def draw_maki(cx, cy, r):
     ellipse(cx - r * 0.32, cy + r * 0.24, r * 0.17, r * 0.15, avocado)
 
 
+# ---------------------------------------------------------------- gunkan
+
+def draw_gunkan(cx, cy, r):
+    """Ikura gunkan: a nori cup of rice crowned with glossy salmon roe."""
+    soft_shadow(cx + 6, cy + 11, r + 9, r * 0.96 + 7)
+
+    # Nori cup wall: tall dark cylinder seen from above, shaded low side.
+    def wall(u, v, d):
+        n = (hash2(int(u * 90 + 300), int(v * 90 + 300)) - 0.5) * 10.0
+        shade = 1.0 - 0.34 * max(0.0, v)
+        return ((17 + n) * shade + 5, (27 + n) * shade + 7,
+                (23 + n) * shade + 5)
+    ellipse(cx, cy + r * 0.07, r, r * 0.97, wall)
+
+    # Rice bed just inside the rim.
+    def rice(u, v, d):
+        if d > 0.88:
+            return None
+        grain = (hash2(int(u * 170 + 700), int(v * 170 + 700)) - 0.5) * 15.0
+        base = 238.0 - 22.0 * d + grain
+        return (base, base * 0.985, base * 0.94)
+    ellipse(cx, cy - r * 0.05, r * 0.94, r * 0.89, rice)
+
+    # Salmon-roe pearls on a triangular lattice, each with its own
+    # specular dot and a slight per-pearl orange gradient. A touch of
+    # deterministic jitter in position and size keeps the mound from
+    # looking machine-stamped.
+    pr = r * 0.185
+    step = pr * 1.72
+    tones = _lcg(int(cx) * 31 + int(cy) * 7 + 5)
+    jit = _lcg(int(cx) * 17 + int(cy) * 13 + 3)
+    row = 0
+    yy = -r * 0.56
+    while yy <= r * 0.56:
+        xx = -r * 0.60 + (step * 0.5 if row % 2 else 0.0)
+        while xx <= r * 0.60:
+            # Elliptical containment, matching the cup's top face.
+            q = (xx / (r * 0.72)) ** 2 + ((yy - r * 0.02) / (r * 0.66)) ** 2
+            if q <= 1.0:
+                tone = next(tones)
+                pcx = cx + xx + (next(jit) - 0.5) * 3.0
+                pcy = cy - r * 0.02 + yy + (next(jit) - 0.5) * 3.0
+                ppr = pr * (0.92 + next(jit) * 0.16)
+
+                def pearl(u, v, d, tone=tone):
+                    base = mix((228, 78, 26), (252, 138, 58), tone)
+                    base = mix(base, (255, 172, 96), (0.5 - 0.5 * v) * 0.55)
+                    edge = 1.0 - 0.20 * d * d
+                    g = gloss(u, v, -0.34, -0.40, 0.52, 1.0)
+                    return (base[0] * edge + 255 * g,
+                            base[1] * edge + 255 * g,
+                            base[2] * edge + 250 * g)
+                ellipse(pcx, pcy, ppr, ppr * 0.94, pearl)
+            xx += step
+        yy += step * 0.88
+        row += 1
+
+
 # ---------------------------------------------------------------- garnish
 
 def draw_wasabi(cx, cy):
@@ -345,21 +483,28 @@ def draw_wasabi(cx, cy):
 
 
 def draw_ginger(cx, cy):
-    """A loose pile of pink pickled-ginger petals."""
-    petals = [(-30, 2, 29, 10, -24), (2, -12, 31, 11, 10), (28, 4, 28, 10, 30),
-              (-14, 15, 27, 10, 40), (16, 18, 26, 9, -12), (0, 0, 25, 10, 62),
-              (-34, 16, 24, 9, 75), (32, -10, 24, 9, -48)]
-    for dx, dy, rx, ry, rot in petals:
-        soft_shadow(cx + dx + 3, cy + dy + 5, rx, ry)
+    """A compact mound of overlapping thin pickled-ginger petals."""
+    soft_shadow(cx + 4, cy + 8, 54, 36)
+    # Layered ellipses, back ring first, crown last: soft pink petals
+    # with paler rims, packed tightly so the pile reads as one mound.
+    petals = [(-27, -9, 25, 14), (25, -11, 24, 13), (0, -18, 26, 14),
+              (-31, 8, 23, 13), (29, 7, 23, 13), (-9, -3, 25, 14),
+              (13, -4, 22, 12), (-17, 13, 21, 12), (11, 13, 21, 12),
+              (0, 3, 19, 11)]
+    for i, (dx, dy, rx, ry) in enumerate(petals):
+        tone = (i % 3) * 0.10
 
-        def fn(nx, ny, lx, ly, rot=rot):
-            base = mix((243, 168, 178), (250, 198, 205), 0.5 - 0.5 * ny)
-            edge = 1.0 - 0.10 * (nx * nx + ny * ny)
-            g = gloss(nx, ny, -0.2, -0.3, 0.7, 0.3)
+        def fn(u, v, d, tone=tone):
+            base = mix((238, 152, 163), (250, 199, 207),
+                       (0.5 - 0.5 * v) * 0.65 + tone)
+            if d > 0.80:  # paler petal edge
+                base = mix(base, (253, 226, 231), (d - 0.80) / 0.20 * 0.85)
+            edge = 1.0 - 0.08 * d * d
+            g = gloss(u, v, -0.25, -0.35, 0.75, 0.38)
             return (base[0] * edge + 255 * g,
                     base[1] * edge + 255 * g,
                     base[2] * edge + 250 * g)
-        rrect(cx + dx, cy + dy, rx, ry, ry - 2, rot, fn)
+        ellipse(cx + dx, cy + dy, rx, ry, fn)
 
 
 def draw_shiso(cx, cy, rot):
@@ -377,6 +522,28 @@ def draw_shiso(cx, cy, rot):
         serr = (hash2(int(lx * 2 + 60), int(ly * 2 + 60)) - 0.5) * 12.0
         return (base[0] + serr, base[1] + serr, base[2] + serr)
     rrect(cx, cy, 64, 42, 40, rot, fn)
+
+
+def draw_lemon(cx, cy, r):
+    """A lemon half: yellow rind around pale segmented flesh."""
+    soft_shadow(cx + 4, cy + 6, r + 5, r * 0.92 + 4)
+
+    def rind(u, v, d):
+        return mix((192, 172, 56), (228, 206, 94), 0.5 - 0.5 * v)
+    ellipse(cx, cy, r, r * 0.92, rind)
+
+    def flesh(u, v, d):
+        if d > 0.84:
+            return None
+        base = mix((238, 218, 124), (250, 236, 168), 1.0 - d)
+        ang = math.atan2(v, u)
+        if abs(math.sin(ang * 4.0)) < 0.16 and d > 0.12:
+            base = mix(base, (252, 246, 205), 0.75)  # pith between segments
+        if d < 0.10:
+            base = mix(base, (252, 246, 205), 0.8)
+        g = gloss(u, v, -0.3, -0.35, 0.7, 0.4)
+        return (base[0] + 240 * g, base[1] + 240 * g, base[2] + 235 * g)
+    ellipse(cx, cy, r, r * 0.92, flesh)
 
 
 def draw_soy_dish(cx, cy):
@@ -407,26 +574,30 @@ def draw_soy_dish(cx, cy):
 def compose():
     draw_background()
     draw_platter()
+    draw_warm_glow()
 
-    draw_shiso(168, 322, -28)
+    draw_shiso(122, 292, -28)
 
-    # Back row of nigiri, then front row.
-    draw_nigiri(252, 218, -11, "salmon")
-    draw_nigiri(408, 192, 5, "tuna")
-    draw_nigiri(560, 222, 13, "salmon")
-    draw_nigiri(320, 348, -5, "tuna")
-    draw_nigiri(482, 352, 8, "tamago")
+    # Back row of nigiri, then front row with a gunkan.
+    draw_nigiri(208, 198, -11, "salmon")
+    draw_nigiri(402, 182, 5, "tuna")
+    draw_nigiri(596, 200, 13, "salmon")
+    draw_nigiri(238, 350, -5, "tuna")
+    draw_nigiri(450, 352, 8, "tamago")
+    draw_gunkan(656, 342, 60)
 
     # Row of maki rolls along the front of the platter.
-    draw_maki(238, 512, 47)
-    draw_maki(330, 532, 49)
-    draw_maki(424, 540, 50)
-    draw_maki(518, 532, 49)
-    draw_maki(608, 512, 47)
+    draw_maki(192, 542, 55)
+    draw_maki(297, 552, 56)
+    draw_maki(402, 556, 56)
+    draw_maki(507, 552, 56)
+    draw_maki(612, 542, 55)
 
-    draw_wasabi(648, 392)
-    draw_ginger(188, 452)
-    draw_soy_dish(626, 618)
+    draw_wasabi(688, 466)
+    draw_ginger(168, 448)
+    draw_lemon(548, 450, 30)
+    draw_gunkan(272, 664, 56)
+    draw_soy_dish(598, 668)
 
 
 def main():
