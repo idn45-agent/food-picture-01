@@ -368,12 +368,16 @@ def draw_tamago(cx, cy, rot):
 def draw_nigiri(cx, cy, rot, kind):
     soft_shadow(cx + 8, cy + 14, 110, 62)
     draw_rice(cx, cy + 6, rot)
+    garnish_seed = int(cx) * 71 + int(cy) * 13 + 7
     if kind == "salmon":
         draw_salmon(cx, cy - 5, rot)
+        draw_scallion_rings(cx, cy - 5, rot, garnish_seed)
     elif kind == "tuna":
         draw_tuna(cx, cy - 5, rot)
+        draw_scallion_rings(cx, cy - 5, rot, garnish_seed)
     else:
         draw_tamago(cx, cy - 5, rot)
+        draw_sesame(cx, cy - 5, rot, garnish_seed)
 
 
 # ---------------------------------------------------------------- maki
@@ -471,6 +475,56 @@ def draw_gunkan(cx, cy, r):
 
 # ---------------------------------------------------------------- garnish
 
+def _local_to_world(cx, cy, rot, lx, ly):
+    """Convert topping-local coords to world coords for a rotated piece."""
+    rot_r = math.radians(rot)
+    cs = math.cos(rot_r)
+    sn = math.sin(rot_r)
+    return (cx + lx * cs - ly * sn, cy + lx * sn + ly * cs)
+
+
+def draw_scallion_rings(cx, cy, rot, seed, count=5):
+    """Tiny sliced scallion rings scattered over a nigiri topping.
+
+    Each ring is a small circle: dark green skin, brighter green wall,
+    pale hollow centre. Positions are deterministic, from the piece seed.
+    """
+    rnd = _lcg(seed)
+    for _ in range(count):
+        lx = (next(rnd) * 2.0 - 1.0) * 56.0
+        ly = (next(rnd) * 2.0 - 1.0) * 23.0
+        wx, wy = _local_to_world(cx, cy, rot, lx, ly)
+        r = 7.4 + next(rnd) * 1.8
+
+        def ring(u, v, d):
+            if d > 0.80:  # dark outer skin
+                return (30, 88, 28)
+            if d > 0.48:  # green tube wall
+                return mix((84, 166, 58), (112, 192, 80), 0.5 - 0.5 * v)
+            return (216, 238, 182)  # pale hollow centre
+        ellipse(wx, wy, r, r * 0.92, ring)
+
+
+def draw_sesame(cx, cy, rot, seed, count=14):
+    """Sparse pale sesame seeds over the tamago, avoiding the nori band."""
+    rnd = _lcg(seed)
+    placed = 0
+    while placed < count:
+        lx = (next(rnd) * 2.0 - 1.0) * 78.0
+        ly = (next(rnd) * 2.0 - 1.0) * 29.0
+        if abs(lx) < 29.0:  # keep off the dark nori band in the middle
+            continue
+        wx, wy = _local_to_world(cx, cy, rot, lx, ly)
+        tall = next(rnd) < 0.30
+        rx, ry = (2.3, 4.6) if tall else (4.6, 2.3)
+
+        def seed_fn(u, v, d):
+            base = mix((250, 240, 204), (228, 208, 158), d)
+            return base
+        ellipse(wx, wy, rx, ry, seed_fn)
+        placed += 1
+
+
 def draw_wasabi(cx, cy):
     soft_shadow(cx + 5, cy + 7, 40, 26)
 
@@ -562,7 +616,7 @@ def draw_soy_dish(cx, cy):
     ellipse(cx, cy, 60, 46, soy)
 
     def shine(u, v, d):
-        g = gloss(u, v, -0.35, -0.45, 0.42, 0.75)
+        g = gloss(u, v, -0.35, -0.45, 0.42, 0.9)
         if g <= 0.0:
             return None
         return (255, 250, 240, g)
